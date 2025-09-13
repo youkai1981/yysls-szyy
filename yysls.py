@@ -1,0 +1,234 @@
+import cv2
+import time
+import math
+import keyboard
+import threading
+import argparse
+from ultralytics import YOLO
+from ch9329 import CH9329
+
+class YYSLS:
+    def __init__(self, model_path="yysls.pt", kbms_port="COM5",camera_index=0,screen=False,log=False, CAP_WIDTH=1920, CAP_HEIGHT=1080,CAP_FPS=30):
+
+        print("初始化 [YOLOv11模型]...", end='', flush=True)
+        self.model = YOLO(model_path, verbose=False)
+        print("\r--[YOLOv11模型] 初始化完成      ") 
+
+        print("初始化 [键鼠模块]...", end='', flush=True)
+        kbms = CH9329(kbms_port)
+        print("\r--[键鼠模块] 初始化完成      ") 
+
+        print("初始化 [视频采集器]...", end='', flush=True)
+        self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+        if not self.cap.isOpened():
+            raise Exception("无法打开USB视频采集器,请检查连接")
+        # 设置视频采集器的分辨率和帧率
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAP_WIDTH)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAP_HEIGHT)
+        self.cap.set(cv2.CAP_PROP_FPS, CAP_FPS)
+        print(f"\r--[视频采集器] 初始化完成,分辨率: {CAP_WIDTH}x{CAP_HEIGHT}, 帧率: {CAP_FPS}FPS") 
+
+        # 是否显示检测窗口
+        self.screen=screen
+        self.log=log
+
+        # 获取识别的分类名称
+        self.class_names = self.model.names
+        # 用于记录每个按键的最后触发时间，防止重复触发
+        self.last_click_times = {}
+
+        #整体开始时间
+        self.main_start_time = time.time()
+
+
+        # FPS统计
+        self.fps = 0
+        self.frame_count = 0
+        self.start_time = time.time()
+
+        # 运行主循环
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.main_start_time))}] 开始进行,按'q'退出")
+        while True:
+            ret, frame = self.cap.read()
+            if not ret:
+                print("无法获取帧，退出")
+                break
+
+            results = self.process_frame(frame)
+
+
+            wh = 550 # 检测坐标Y
+            key_positions = [
+                ("S", 335, wh), # 检测S列的坐标
+                ("D", 535, wh), # 检测D列的坐标
+                ("F", 750, wh), # 检测F列的坐标
+                ("J", 1170, wh), # 检测J列的坐标
+                ("K", 1385, wh), # 检测K列的坐标
+                ("L", 1590, wh), # 检测L列的坐标
+            ]
+
+            self.draw_and_click(frame, kbms, results,key_positions,15,0.8,0.1)
+
+            self.draw_fps(frame)      
+            if self.screen: cv2.imshow('YYSLS by youkai', frame)
+
+            # 捕捉 q 键退出
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("检测到q键，退出程序")
+                break
+
+            if keyboard.is_pressed('q'):
+                print("检测到q键，退出程序")
+                break
+
+        self.cap.release()
+        cv2.destroyAllWindows()
+        kbms.key_release()
+        kbms.close()
+
+
+
+
+    def process_frame(self, frame):
+        """使用YOLOv11处理帧并返回结果"""
+        results = self.model(frame, verbose=False)
+        return results[0]
+
+
+    def draw_fps(self, frame):
+        if not self.screen: return
+
+        """在帧上绘制FPS，并自动统计FPS"""
+        self.frame_count += 1
+        now = time.time()
+        # 每秒更新一次FPS
+        if now - self.start_time >= 1:
+            self.fps = self.frame_count
+            self.frame_count = 0
+            self.start_time = now
+        cv2.putText(frame, f"FPS: {self.fps}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+        # cv2.line(frame,(0,key_line_y),(1920,key_line_y),(0,255,0),2)
+
+
+    # 绘制外框和标签
+    def draw_box_and_label(self, frame, box, cls, conf, hit):
+        if not self.screen: return
+
+        """
+        绘制单个检测框和标签，可选是否保存YOLO格式标注
+        """
+
+        if hit:
+            color = (0, 255, 0)  # 绿色表示已触发
+        else:
+            color = (0, 0, 255)  # 红色表示未触发
+    
+        x1, y1, x2, y2 = map(int, box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"{self.class_names[int(cls)]}: {conf:.2f}"
+        (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+        cv2.rectangle(frame, (x1, y1 - label_height - baseline), (x1 + label_width, y1), color, -1)
+        cv2.putText(frame, label, (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+
+
+    # 触发按键
+    def trigger_key(self, kbms,target_category,target_key,keyconf):
+        try:
+            def async_save_and_key(keyconf):
+                # 检测到按键后延时0.5秒再触发按键
+                time.sleep(0.5)
+                #触发按键
+                if target_category == 0:
+                    kbms.key_click(target_key)
+                    if self.log:print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] 触发按键: {target_key}, 类别: 按键, 置信度: {keyconf:.2f}, 触发时间: {(time.time()-self.main_start_time):.3f}")
+                if target_category == 1:
+                    kbms.key_down(target_key)
+                    if self.log:print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] 触发按键: {target_key}, 类别: 长按, 置信度: {keyconf:.2f}, 触发时间: {(time.time()-self.main_start_time):.3f}")
+                # if target_category == 2:
+                    # kbms.key_up(target_key)
+                    # if self.log:print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] 触发按键: {target_key}, 类别: 抬起, 置信度: {keyconf:.2f}, 触发时间: {(time.time()-self.main_start_time):.3f}")
+            threading.Thread(target=async_save_and_key,args=(keyconf,), daemon=True).start()
+        except Exception:
+            pass
+
+    # 触发绘制框和按键
+    def draw_and_click(self, frame, kbms, results, key_positions=None, threshold=15,min_confidence=0.9, delay=0.1):
+        current_time = time.time()
+
+        # 位置、类别和置信度检测结果
+        boxes = results.boxes.xyxy.cpu().numpy() if results.boxes else []
+        classes = results.boxes.cls.cpu().numpy() if results.boxes else []
+        confidences = results.boxes.conf.cpu().numpy() if results.boxes else []
+        
+        # 先判断是否有按键触发
+        for box, cls, conf in zip(boxes, classes, confidences):
+            # 只处理高置信度目标
+            if conf < min_confidence:
+                continue
+            # 计算目标中心点
+            x1, y1, x2, y2 = map(int, box)
+            center_x = (x1 + x2) / 2
+            center_y = (y1 + y2) / 2
+
+            # 检查是否在任意按键范围内且满足延时要求
+            for key, kx, ky in key_positions:
+                last_time = self.last_click_times.get(key, 0)
+                # 计算m目标与按键位置的距离
+                distance = math.hypot(center_x - kx, center_y - ky)
+                # 满足距离要求
+                if (distance <= threshold):
+                    #满足延时要求 触发按键
+                    if (current_time - last_time >= delay):
+                        # 检测类别
+                        target_category = int(cls)
+                        # 触发按键并保存抓图和标注dq
+                        self.trigger_key(kbms,target_category,key,conf)
+                        # 更新最后点击时间
+                        self.last_click_times[key] = current_time
+                        break
+                    # 画框 已命中
+                    self.draw_box_and_label(frame, box, cls, conf, True) 
+                else:
+                    # 画框 未命中
+                    self.draw_box_and_label(frame, box, cls, conf, False) 
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='烟云十六声 (YYSLS) 自动演奏工具')
+
+    # 添加可选参数
+    parser.add_argument('-kp', '--kbms_port', help='键盘端口号', default="COM5")
+    parser.add_argument('-ci', '--camera_index', type=int, help='摄像头索引', default=0)
+    parser.add_argument('-sp', '--screen', type=bool, help='显示检测窗口',default=False)
+    parser.add_argument('-lg', '--log', type=bool, help='启用日志记录',default=True)
+    parser.add_argument('-cw', '--CAP_WIDTH', type=int, help='采集宽度', default=1920)
+    parser.add_argument('-ch', '--CAP_HEIGHT', type=int, help='采集高度', default=1080)
+    parser.add_argument('-cf', '--CAP_FPS', type=int, help='采集帧率', default=30)
+
+    args = parser.parse_args()
+
+    art = f"""
+    ██    ██  ██████  ██    ██ ██   ██  █████  ██ 
+     ██  ██  ██    ██ ██    ██ ██  ██  ██   ██ ██ 
+     ████   ██    ██ ██    ██ █████   ███████ ██ 
+     ██    ██    ██ ██    ██ ██  ██  ██   ██ ██ 
+    ██     ██████   ██████  ██   ██ ██   ██ ██ 
+             [烟云十六声-丝竹雅韵]
+            AI演奏机器人 by youkai
+        """
+
+    print(art)
+    
+    print("--运行参数:")
+    for arg in vars(args):
+        print(f"  {arg}: {getattr(args, arg)}")
+    YYSLS(kbms_port=args.kbms_port,
+           camera_index=args.camera_index,
+           screen=args.screen,
+           log=args.log,
+           CAP_WIDTH=args.CAP_WIDTH,
+           CAP_HEIGHT=args.CAP_HEIGHT,
+           CAP_FPS=args.CAP_FPS)
+
