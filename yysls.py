@@ -1,17 +1,28 @@
-import cv2
-import time
-import math
+
+import sys, os,time,threading,argparse
+import cv2,math
 import keyboard
-import threading
-import argparse
 from ultralytics import YOLO
 from ch9329 import CH9329
 
 class YYSLS:
+    def resource_path(self,filename: str) -> str:
+        """获取附属文件路径，支持打包/未打包"""
+        if hasattr(sys, "_MEIPASS"):
+            # 打包后的临时目录
+            return os.path.join(sys._MEIPASS, filename)
+        else:
+            # 开发环境，直接从当前目录读取
+            return os.path.join(os.path.abspath("."), filename)
+
     def __init__(self, model_path="yysls.pt", kbms_port="COM5",camera_index=0,screen=False,log=False, CAP_WIDTH=1920, CAP_HEIGHT=1080,CAP_FPS=30):
 
         print("初始化 [YOLOv11模型]...", end='', flush=True)
-        self.model = YOLO(model_path, verbose=False)
+        
+        self.model = YOLO(self.resource_path(model_path), verbose=False)
+
+
+
         print("\r--[YOLOv11模型] 初始化完成      ") 
 
         print("初始化 [键鼠模块]...", end='', flush=True)
