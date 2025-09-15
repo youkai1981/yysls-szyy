@@ -1,4 +1,3 @@
-
 import sys, os,time,threading,argparse
 import cv2,math
 import keyboard
@@ -58,7 +57,7 @@ class YYSLS:
         self.start_time = time.time()
 
         # 运行主循环
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.main_start_time))}] 开始进行,按'q'退出")
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.main_start_time))}] 开始监控单人演奏,按'q'退出")
         while True:
             ret, frame = self.cap.read()
             if not ret:
@@ -204,12 +203,61 @@ class YYSLS:
                     # 画框 未命中
                     self.draw_box_and_label(frame, box, cls, conf, False) 
 
+def txdx(kbms_port,log):
+    kbms = CH9329(kbms_port)
+    # 音符到键盘按键的映射
+    keymap = {
+            # 高音区
+            "+1": "q", "+2": "w", "+3": "e", "+4": "r", "+5": "t", "+6": "y", "+7": "u",
+            # 中音区
+            "1": "a", "2": "s", "3": "d", "4": "f", "5": "g", "6": "h", "7": "j",
+            # 低音区
+            "-1": "z", "-2": "x", "-3": "c", "-4": "v", "-5": "b", "-6": "n", "-7": "m"
+    }
+
+    delay=0.3
+
+    print("2秒后开始演奏[铁血丹心],请将游戏丝竹雅韵的自由演奏窗口置于前台，箜篌与古琴效果较好")
+
+    time.sleep(2)
+
+    # 示例曲谱 - 铁血丹心
+    txdx = [
+        #依稀往梦似曾见
+        ["2","-3","-6"],["1","3"],["1","2"],["2","1"],["1","7"], ["3","6", "-3", "-6"],["1","3"], ["1","6"], 
+        #心内波澜现
+        ["1","-6"], ["1","-5"],["1","-3"],["1","6"],["1","5"],["2","3"],["1","5"],["1","2"],["2","3","-3"],["1","-3"],["1","-5"],["2","-6"],["1"],
+        #抛开世事断愁怨
+        ["1","3"], ["1","2"], ["3","1"], ["1","7"], ["3","6","-6"], ["1","3"], ["2","6"], ["1","-6"], ["1","-5"], ["1","-4"], 
+        #相伴到天边
+        ["1","2"], ["1","1"], ["2","-6"], ["1","1"], ["1","2"], ["1","3","-7","-3"], ["0.5","3","-7","-3"], ["0.5","3","-7","-3"], ["0.5","3","-7","-3"], ["0.5","3","-7","-3"], 
+        #逐草四方沙漠苍茫
+        ["2","3","-3","-6"],["2","6","-3","-6"],["1","-3","-6"],["1","5"],["2","6","-3","-6"],["1","5","-3","-6"],["1","3"],["2","5","-2","-5"],["2","2","-2","-5"],["2","-2","-5"],["2","-2","-5"], 
+        #哪惧雪霜扑面
+        ["2","1","-1","4"],["1","-1","4"],["1","-6"],["1","2","-2","-5"],["1","3"],["1","5","-2","-5"],["1","4"],["1","3","-3","-7"],["1","-3","-7"],["1","-3","-7"],["1","-3","-7"],["1","-3","-7"], 
+        #射雕印弓塞外奔驰
+        ["2","3"],["1","6","-3","-6"],["1","-3","-6"],["1","5"],["2","6","-3","-6"],["1","5","-3","-6"],["1","3"],["2","5","-2","-5"],["2","2","-2","-5"],["2","-2","-5"],["2","-2","-5"], 
+        #笑傲此生无厌倦
+        ["2","1","-1","-4"],["1","-1","-4"],["1","6"],["1","2","-2","-5"],["1","3"],["1","5","-2","-5"],["1","7"],["4","6","-1","-6"], 
+    ]
+
+
+    for ks in txdx:
+        keys = [keymap.get(k) for k in ks[1:] if k in keymap]
+        if log:print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}] 触发按键: {keys}, 演奏音符: {ks[1:]}")
+        if keys : kbms.key_combo(keys)
+        time.sleep(delay*float(ks[0]))
+        if keys :kbms.key_release()
+
+    kbms.close()
+        
+
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='烟云十六声 (YYSLS) 自动演奏工具')
+    parser = argparse.ArgumentParser(description='烟云十六声 (YYSLS) AI演奏机器人')
 
-    # 添加可选参数
+    parser.add_argument('-m', '--mode',choices=["txdx", "normal"],help="演奏模式: txdx=铁血丹心演奏, normal=单人自动演奏 (默认 normal)",default="normal")
     parser.add_argument('-kp', '--kbms_port', help='键盘端口号', default="COM5")
     parser.add_argument('-ci', '--camera_index', type=int, help='摄像头索引', default=0)
     parser.add_argument('-sp', '--screen', type=bool, help='显示检测窗口',default=False)
@@ -235,11 +283,16 @@ if __name__ == "__main__":
     print("--运行参数:")
     for arg in vars(args):
         print(f"  {arg}: {getattr(args, arg)}")
-    YYSLS(kbms_port=args.kbms_port,
-           camera_index=args.camera_index,
-           screen=args.screen,
-           log=args.log,
-           CAP_WIDTH=args.CAP_WIDTH,
-           CAP_HEIGHT=args.CAP_HEIGHT,
-           CAP_FPS=args.CAP_FPS)
+
+    if args.mode=="txdx":
+        txdx(kbms_port=args.kbms_port,
+             log=args.log)
+    elif args.mode=="normal":
+        YYSLS(kbms_port=args.kbms_port,
+            camera_index=args.camera_index,
+            screen=args.screen,
+            log=args.log,
+            CAP_WIDTH=args.CAP_WIDTH,
+            CAP_HEIGHT=args.CAP_HEIGHT,
+            CAP_FPS=args.CAP_FPS)
 
